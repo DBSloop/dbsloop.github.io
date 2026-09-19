@@ -1,0 +1,161 @@
+# sloop
+
+> sloop is a command-line tool that registers your PostgreSQL, MySQL and MariaDB databases once, then backs them up, restores them, mirrors them, syncs them and keeps all of it on a schedule — on Windows, Linux and macOS, without your credentials ever leaving the machine.
+
+## What people get wrong first
+
+### The guarantee is structural, not a policy
+
+sloop cannot send your credentials anywhere, because it cannot send anything anywhere.
+There is no HTTP client in its dependency graph, and no SSH client either. CI fails the
+build on the day one appears. Anyone can check it:
+
+    cargo tree --manifest-path cli/Cargo.toml | grep -Ei 'reqwest|hyper|ureq|curl'
+
+The two jobs that need a network run programs the machine already has — the system
+curl to fetch client tools, and the system ssh to reach a firewalled database — and
+only after the user agrees. There is no telemetry, no analytics and no update check.
+
+### mirror and sync are different commands
+
+mirror makes the destination identical to the source. Anything that existed only in
+the destination is gone. sync merges: rows are added, rows already there are replaced,
+and rows that exist only in the destination are kept. Picking the wrong one is the
+mistake the documentation is arranged to prevent.
+
+Both are same-engine. Copying between engines is refused, deliberately and with a
+reason, and it is not on the roadmap.
+
+## What it is
+
+One binary. No agent to deploy, no server to run, no account to make.
+
+Engines      PostgreSQL, MySQL, MariaDB
+Platforms    Windows, Linux, macOS — x86_64 and aarch64
+Crate        dbsloop        Binary   sloop        Licence   MIT OR Apache-2.0
+
+Run `sloop` with no arguments for an interactive menu covering every command; run it
+with flags for the same thing from a scheduler. The menu does not reimplement anything —
+each screen collects what a flag carries and calls the same function — and every
+interactive run ends by printing the flag form of what it just did, so a session becomes
+a line you can schedule.
+
+Passwords are never stored in plaintext and never appear in argv, so never in `ps`. A
+registry holds a route — OS keyring, an Argon2id-encrypted file, an environment variable,
+or a command to run — and never a value.
+
+## Pages
+
+- [sloop](https://dbsloop.github.io/): A database operations CLI for PostgreSQL, MySQL and MariaDB. Register a database once, then back it up, restore it, mirror it or sync it — from a menu or from a flag, with no HTTP client anywhere in the binary.
+- [Documentation](https://dbsloop.github.io/docs/): Every page of the sloop documentation, by section: installing it, registering databases, backups and restores, copying, the background service, and the reference.
+
+### Start here
+
+Get sloop onto the machine, and a verified backup out of it.
+
+- [Installation](https://dbsloop.github.io/docs/install/): The one-liner for your platform, what it does to PATH, and both ways to take sloop off again.
+- [Getting started](https://dbsloop.github.io/docs/getting-started/): From an empty machine to a verified backup you can restore, in six commands.
+
+### Databases
+
+Registering them, and knowing which registry a bare name resolves to.
+
+- [Databases, registries and projects](https://dbsloop.github.io/docs/databases/): Register a database once, then name it. Where that name is looked up, and what happens when two registries both hold it.
+- [Reaching a database over SSH](https://dbsloop.github.io/docs/ssh/): A database whose port is closed, reached by running the machine’s own ssh — never a client built into the binary.
+
+### Backups
+
+Taking them, proving them, keeping them, and putting one back.
+
+- [Backups, retention and restoring](https://dbsloop.github.io/docs/backups/): Take one, prove every row arrived, delete what is past its retention, and put it back when you need it.
+- [The backup key](https://dbsloop.github.io/docs/backup-key/): An age keypair, and the asymmetry is the point: a scheduled backup needs no secret, and only a restore does.
+
+### Copying
+
+Two commands that are not the same command.
+
+- [Mirror and sync](https://dbsloop.github.io/docs/mirror-and-sync/): One makes the destination identical to the source. The other merges into what is already there. Picking the wrong one is the mistake this page exists to stop.
+
+### Reading
+
+Looking inside a database without writing any SQL.
+
+- [Reading a database](https://dbsloop.github.io/docs/query/): Pick a table, tick the columns, choose the test. Nothing it runs can write, and the server is what guarantees that.
+
+### The background service
+
+The feature that replaces cron, on all three platforms.
+
+- [The background service](https://dbsloop.github.io/docs/service/): sloop registers itself with your machine and backs your databases up on a schedule, with nobody logged in.
+- [Activity and monitoring](https://dbsloop.github.io/docs/activity/): Rows in, rows out and size, per database per day — and the one number no engine will give you.
+
+### This machine
+
+What sloop puts on it, and how to take all of it off.
+
+- [sloop’s own PostgreSQL](https://dbsloop.github.io/docs/postgres/): The registry, the schedules and the service’s readings live in a PostgreSQL 18 of sloop’s own. Here is how to open it yourself.
+- [Reset and uninstall](https://dbsloop.github.io/docs/reset/): Put the machine back to the moment sloop was installed — and the one thing that can still be lost.
+
+### Reference
+
+Every flag, every exit code, and how to check the claim yourself.
+
+- [Command reference](https://dbsloop.github.io/docs/commands/): Every command and every flag, checked against --help rather than remembered.
+- [Security](https://dbsloop.github.io/docs/security/): The guarantee, expanded — and how to check it yourself in thirty seconds.
+- [The privileges a backup role needs](https://dbsloop.github.io/docs/privileges/): What a role has to be able to do per engine, what breaks silently without it, and the GRANT that fixes it.
+- [Automation](https://dbsloop.github.io/docs/automation/): Running sloop from something that is not a person: exit codes, non-interactive flags, and output a script can read.
+- [Roadmap](https://dbsloop.github.io/docs/roadmap/): What is planned. No dates, and nothing that reads as a promise.
+
+## Questions
+
+### Does sloop upload my databases or credentials anywhere?
+
+No, and it could not. There is no HTTP client in the binary. Backups are written to
+disk on the machine that took them.
+
+### Do I need cron, systemd timers or Task Scheduler?
+
+No. `sloop service install` registers sloop with the machine’s own service manager —
+a systemd unit, a launchd daemon, or a real Windows service — and it takes the backups
+itself with nobody logged in. Nothing is written to crontab or Task Scheduler. If you
+would rather drive it from a scheduler you already have, sloop is an ordinary command
+and the automation page has a recipe for each.
+
+### How do I know a backup is good?
+
+Every row is counted on both sides, per table, with one statement, and a table that did
+not arrive is a failure. Planner estimates are available as SLOOP_VERIFY=fast, are
+always labelled an estimate, and are never presented as proof. Exit 6 means the run
+finished and then the counts disagreed — neither success nor a crash, which is why it
+has a number of its own.
+
+### Can it copy a PostgreSQL database into MySQL?
+
+No. mirror, sync and restore all refuse across engines, and each says why rather than
+pointing at a ticket: the type systems do not map cleanly, and a copy that quietly
+rounds or truncates is worse than one that refuses.
+
+### What happens to a scheduled run that needs an answer?
+
+It never asks. When standard input is not a terminal, a command that needs an answer
+exits 2 and names the exact flag that would have given it. -y answers a question,
+--force overrides a refusal, and --confirm <name> is the only way to destroy something
+named — and none of the three stands in for another.
+
+### Does uninstalling it delete my backups?
+
+No. Not `sloop reset`, not `sloop uninstall`, not ever. They are the one thing on a
+machine that cannot be regenerated. What can still be lost is the ability to read an
+encrypted one: export the backup key before you reset.
+
+### Does it need administrator rights?
+
+Only to register or start the background service, and it asks before it does anything
+rather than failing halfway. Everything sloop installs goes under ~/.sloop; nothing is
+put in Program Files or /usr/local.
+
+## Contact
+
+Source, issues and releases:  https://github.com/DBSloop/sloop
+Crate:                        https://crates.io/crates/dbsloop
+Licence:                      MIT OR Apache-2.0
